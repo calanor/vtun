@@ -1,7 +1,7 @@
 /*  
     VTun - Virtual Tunnel over TCP/IP network.
 
-    Copyright (C) 1998-2000  Maxim Krasnyansky <max_mk@yahoo.com>
+    Copyright (C) 1998-2008  Maxim Krasnyansky <max_mk@yahoo.com>
 
     VTun has been derived from VPPP package by Maxim Krasnyansky. 
 
@@ -17,15 +17,12 @@
  */
 
 /*
- * auth.c,v 1.2.2.7.2.3 2006/11/16 04:02:33 mtbishop Exp
+ * $Id: auth.c,v 1.9.2.4 2009/04/24 09:15:33 mtbishop Exp $
  */ 
 
 /*
  * Challenge based authentication. 
  * Thanx to Chris Todd<christ@insynq.com> for the good idea.
- *
- * Jim Yonan, 05/24/2001
- * 	gen_chal rewrite to use better random number generator 
  */ 
 
 #include "config.h"
@@ -172,15 +169,23 @@ char *bf2cf(struct vtun_host *host)
      if( host->flags & VTUN_KEEP_ALIVE )
 	*(ptr++) = 'K';
 
-     if( host->flags & VTUN_ENCRYPT )
-	ptr += sprintf(ptr,"E%d", host->cipher);
+     if( host->flags & VTUN_ENCRYPT ) {
+        if (host->cipher == VTUN_LEGACY_ENCRYPT) { /* use old flag method */
+	   ptr += sprintf(ptr,"E");
+	} else {
+	   ptr += sprintf(ptr,"E%d", host->cipher);
+	}
+     }
 
      strcat(ptr,">");
 
      return str;
 }
 
-/* return 1 on success, otherwise 0 */
+/* return 1 on success, otherwise 0 
+   Example:
+   FLAGS: <TuE1>
+*/
 
 int cf2bf(char *str, struct vtun_host *host)
 {
@@ -188,6 +193,7 @@ int cf2bf(char *str, struct vtun_host *host)
      int s;
 
      if( (ptr = strchr(str,'<')) ){ 
+	vtun_syslog(LOG_DEBUG,"Remote Server sends %s.", ptr);
 	ptr++;
 	while(*ptr){  
 	   switch(*ptr++){
@@ -229,10 +235,19 @@ int cf2bf(char *str, struct vtun_host *host)
 		ptr = p;
 		break;
 	     case 'E':
-		if((s = strtol(ptr,&p,10)) == ERANGE || ptr == p) 
+	        /* new form is 'E10', old form is 'E', so remove the
+		   ptr==p check */
+		if((s = strtol(ptr,&p,10)) == ERANGE) {
+		   vtun_syslog(LOG_ERR,"Garbled encryption method.  Bailing out.");
 		   return 0;
+		}
 		host->flags |= VTUN_ENCRYPT;
-		host->cipher = s; 
+		if (0 == s) {
+		   host->cipher = VTUN_LEGACY_ENCRYPT;
+		   vtun_syslog(LOG_INFO,"Remote server using older encryption.");
+		} else {
+		   host->cipher = s; 
+		}
 		ptr = p;
 		break;
      	     case 'S':
@@ -244,6 +259,9 @@ int cf2bf(char *str, struct vtun_host *host)
 		}
 		ptr = p;
 		break;
+	     case 'F':
+	        /* reserved for Feature transmit */
+	       break;
 	     case '>':
 	        return 1;
 	     default:

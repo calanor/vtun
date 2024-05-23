@@ -1,7 +1,7 @@
 /*  
     VTun - Virtual Tunnel over TCP/IP network.
 
-    Copyright (C) 1998-2000  Maxim Krasnyansky <max_mk@yahoo.com>
+    Copyright (C) 1998-2008  Maxim Krasnyansky <max_mk@yahoo.com>
 
     VTun has been derived from VPPP package by Maxim Krasnyansky. 
 
@@ -17,7 +17,7 @@
  */
 
 /*
- * lfd_lzo.c,v 1.1.1.2.2.7.2.1 2006/11/16 04:03:00 mtbishop Exp
+ * $Id: lfd_lzo.c,v 1.5.2.5 2012/07/09 01:01:08 mtbishop Exp $
  */ 
 
 /* LZO compression module */
@@ -35,6 +35,7 @@
 
 #ifdef HAVE_LZO
 
+#include "lzoutil.h"
 #include "lzo1x.h"
 #include "lzoutil.h"
 
@@ -54,7 +55,7 @@ int (*lzo1x_compress)(const lzo_byte *src, lzo_uint  src_len,
 int alloc_lzo(struct vtun_host *host)
 {
      int zlevel = host->zlevel ? host->zlevel : 1;
-     int mem;
+     lzo_uint mem;
 
      switch( zlevel ){
 	case 9:
@@ -103,7 +104,7 @@ int free_lzo()
  */  
 int comp_lzo(int len, char *in, char **out)
 { 
-     unsigned int zlen = 0;    
+     lzo_uint zlen = 0;    
      int err;
      
      if( (err=lzo1x_compress((void *)in,len,zbuf,&zlen,wmem)) != LZO_E_OK ){
@@ -117,7 +118,7 @@ int comp_lzo(int len, char *in, char **out)
 
 int decomp_lzo(int len, char *in, char **out)
 {
-     unsigned int zlen = 0;
+     lzo_uint zlen = 0;
      int err;
 
      if( (err=lzo1x_decompress((void *)in,len,zbuf,&zlen,wmem)) != LZO_E_OK ){

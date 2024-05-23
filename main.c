@@ -1,7 +1,7 @@
 /*  
     VTun - Virtual Tunnel over TCP/IP network.
 
-    Copyright (C) 1998-2000  Maxim Krasnyansky <max_mk@yahoo.com>
+    Copyright (C) 1998-2008  Maxim Krasnyansky <max_mk@yahoo.com>
 
     VTun has been derived from VPPP package by Maxim Krasnyansky. 
 
@@ -17,7 +17,7 @@
  */
 
 /*
- * main.c,v 1.1.1.2.2.8.2.4 2006/11/16 04:03:41 mtbishop Exp
+ * $Id: main.c,v 1.9.2.5 2012/07/08 05:32:57 mtbishop Exp $
  */ 
 
 #include "config.h"
@@ -50,9 +50,12 @@ void usage(void);
 extern int optind,opterr,optopt;
 extern char *optarg;
 
+/* for the NATHack bit.  Is our UDP session connected? */
+int is_rmt_fd_connected=1; 
+
 int main(int argc, char *argv[], char *env[])
 {
-     int svr, daemon, sock, dofork, fd, opt;
+  int svr, daemon, sock, dofork, fd, opt;
      struct vtun_host *host = NULL;
      struct sigaction sa;
      char *hst;
@@ -83,13 +86,13 @@ int main(int argc, char *argv[], char *env[])
      default_host.multi   = VTUN_MULTI_ALLOW;
      default_host.timeout = VTUN_CONNECT_TIMEOUT;
      default_host.ka_interval = 30;
-     default_host.ka_failure  = 4;
+     default_host.ka_maxfail  = 4;
      default_host.loc_fd = default_host.rmt_fd = -1;
 
      /* Start logging to syslog and stderr */
      openlog("vtund", LOG_PID | LOG_NDELAY | LOG_PERROR, LOG_DAEMON);
 
-     while( (opt=getopt(argc,argv,"misf:P:L:t:np")) != EOF ){
+     while( (opt=getopt(argc,argv,"misf:P:L:t:npq")) != EOF ){
 	switch(opt){
 	    case 'm':
 	        if (mlockall(MCL_CURRENT | MCL_FUTURE) < 0) {
@@ -120,6 +123,9 @@ int main(int argc, char *argv[], char *env[])
 	    case 't':
 	        vtun.timeout = atoi(optarg);	
 	        break;
+	    case 'q':
+		vtun.quiet = 1;
+		break;
 	    default:
 		usage();
 	        exit(1);
@@ -132,6 +138,8 @@ int main(int argc, char *argv[], char *env[])
  	closelog();
  	openlog("vtund", LOG_PID|LOG_NDELAY|LOG_PERROR, vtun.syslog);
      }
+
+	clear_nat_hack_flags(svr);
 
      if(!svr){
 	if( argc - optind < 2 ){

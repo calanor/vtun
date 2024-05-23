@@ -70,5 +70,7 @@
 
 #undef HAVE_SHAPER
 
+#undef ENABLE_NAT_HACK
+
 /* Release version and date */
 #undef VTUN_VER

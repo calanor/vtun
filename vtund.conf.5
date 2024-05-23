@@ -51,6 +51,12 @@ server type. \fBvtund\fR(8) can operate in standalone
 mode (\fBstand\fR), that is the default, or be invoked from
 .BR inetd (8).
 
+.IP \fBipv4\fR
+use IPv4 as transport medium. This is the default. Inside the tunnel other types are of course usable.
+
+.IP \fBipv6\fR
+use IPv6 as transport medium.
+
 .IP \fBport\ \fIportnumber\fR
 server port number to listen on or connect to.
 By default, \fBvtund\fR(8) uses port 5000.

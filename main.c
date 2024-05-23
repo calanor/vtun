@@ -43,7 +43,7 @@
 struct vtun_opts vtun;
 struct vtun_host default_host;
 
-void write_pid(void);
+void write_pid(char *, char *);
 void reread_config(int sig);
 void usage(void);
 
@@ -66,6 +66,8 @@ int main(int argc, char *argv[], char *env[])
      vtun.cfg_file = VTUN_CONFIG_FILE;
      vtun.persist = -1;
      vtun.timeout = -1;
+     vtun.sslauth = -1;
+     vtun.transport_af = AF_INET;
 	
      /* Dup strings because parser will try to free them */
      vtun.ppp   = strdup("/usr/sbin/pppd");
@@ -88,11 +90,16 @@ int main(int argc, char *argv[], char *env[])
      default_host.ka_interval = 30;
      default_host.ka_maxfail  = 4;
      default_host.loc_fd = default_host.rmt_fd = -1;
+#ifdef HAVE_SSL
+     default_host.sslauth = 1;
+#else	/* HAVE_SSL */
+     default_host.sslauth = 0;
+#endif	/* HAVE_SSL */
 
      /* Start logging to syslog and stderr */
      openlog("vtund", LOG_PID | LOG_NDELAY | LOG_PERROR, LOG_DAEMON);
 
-     while( (opt=getopt(argc,argv,"misf:P:L:t:npq")) != EOF ){
+     while( (opt=getopt(argc,argv,"misf:P:L:t:npq46")) != EOF ){
 	switch(opt){
 	    case 'm':
 	        if (mlockall(MCL_CURRENT | MCL_FUTURE) < 0) {
@@ -126,6 +133,12 @@ int main(int argc, char *argv[], char *env[])
 	    case 'q':
 		vtun.quiet = 1;
 		break;
+	    case '4':
+		vtun.transport_af = AF_INET;
+	        break;
+	    case '6':
+		vtun.transport_af = AF_INET6;
+	        break;
 	    default:
 		usage();
 	        exit(1);
@@ -166,6 +179,16 @@ int main(int argc, char *argv[], char *env[])
 	vtun.persist = 0;
      if(vtun.timeout == -1)
 	vtun.timeout = VTUN_TIMEOUT;
+    /* 
+     * Want to save behaviour from older version: stronger authentication
+     * if compiled with --enable-ssl, weaker otherwise
+     */
+     if(vtun.sslauth == -1)
+#ifdef HAVE_SSL
+	vtun.sslauth = 1;
+#else	/* HAVE_SSL */
+	vtun.sslauth = 0;
+#endif	/* HAVE_SSL */
 
      switch( vtun.svr_type ){
 	case -1:
@@ -201,11 +224,12 @@ int main(int argc, char *argv[], char *env[])
         init_title(argc,argv,env,"vtund[s]: ");
 
 	if( vtun.svr_type == VTUN_STAND_ALONE )	
-	   write_pid();
+	   write_pid("server", NULL);
 	
 	server(sock);
      } else {	
         init_title(argc,argv,env,"vtund[c]: ");
+	write_pid(host->host, vtun.svr_name);
         client(host);
      }
 
@@ -216,15 +240,29 @@ int main(int argc, char *argv[], char *env[])
 
 /* 
  * Very simple PID file creation function. Used by server.
- * Overrides existing file. 
+ * Overrides existing file. Optionally adds session name and host name to the
+ * pidfile name (this naming is very confusing, as the session is referred as
+ * host most of the time)
  */
-void write_pid(void)
+void write_pid(char *session, char *host)
 {
+     char fn[1024];
      FILE *f;
 
-     if( !(f=fopen(VTUN_PID_FILE,"w")) ){
-        vtun_syslog(LOG_ERR,"Can't write PID file");
-        return;
+     if(session != NULL && host != NULL) {
+	  snprintf(fn, sizeof(fn), "%s/vtund.%s-%s.pid", VTUN_PID_DIR, session,
+			  host);
+     } else if(session != NULL) {
+	  snprintf(fn, sizeof(fn), "%s/vtund.%s.pid", VTUN_PID_DIR, session);
+     } else {
+          snprintf(fn, sizeof(fn), "%s/vtund.pid", VTUN_PID_DIR);
+     }
+     /* Make sure the PID file is not there before opening it for writing. */
+     unlink(fn);
+
+     if( !(f = fopen(fn, "w")) ) {
+          syslog(LOG_ERR, "Can't write PID file %s: %s", fn, strerror(errno));
+          return;
      }
 
      fprintf(f,"%d",(int)getpid());

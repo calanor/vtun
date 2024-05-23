@@ -61,17 +61,17 @@
 #define ENC_BUF_SIZE VTUN_FRAME_SIZE + 16 
 #define ENC_KEY_SIZE 16
 
-BF_KEY key;
-char * enc_buf;
+BF_KEY l_key;
+char * l_enc_buf;
 
 int alloc_legacy_encrypt(struct vtun_host *host)
 {
-   if( !(enc_buf = lfd_alloc(ENC_BUF_SIZE)) ){
+   if( !(l_enc_buf = lfd_alloc(ENC_BUF_SIZE)) ){
       vtun_syslog(LOG_ERR,"Can't allocate buffer for legacy encryptor");
       return -1;
    }
 
-   BF_set_key(&key, ENC_KEY_SIZE, MD5(host->passwd,strlen(host->passwd),NULL));
+   BF_set_key(&l_key, ENC_KEY_SIZE, MD5(host->passwd,strlen(host->passwd),NULL));
 
    vtun_syslog(LOG_INFO, "BlowFish legacy encryption initialized");
    return 0;
@@ -79,14 +79,14 @@ int alloc_legacy_encrypt(struct vtun_host *host)
 
 int free_legacy_encrypt()
 {
-   lfd_free(enc_buf); enc_buf = NULL;
+   lfd_free(l_enc_buf); l_enc_buf = NULL;
    return 0;
 }
 
 int legacy_encrypt_buf(int len, char *in, char **out)
 { 
    register int pad, p;
-   register char *in_ptr = in, *out_ptr = enc_buf;
+   register char *in_ptr = in, *out_ptr = l_enc_buf;
 
    /* 8 - ( len % 8 ) */
    pad = (~len & 0x07) + 1; p = 8 - pad;
@@ -94,14 +94,14 @@ int legacy_encrypt_buf(int len, char *in, char **out)
    memset(out_ptr, 0, pad);
    *out_ptr = (char) pad;
    memcpy(out_ptr + pad, in_ptr, p);  
-   BF_ecb_encrypt(out_ptr, out_ptr, &key, BF_ENCRYPT);
+   BF_ecb_encrypt(out_ptr, out_ptr, &l_key, BF_ENCRYPT);
    out_ptr += 8; in_ptr += p; 
    len = len - p;
 
    for (p=0; p < len; p += 8)
-      BF_ecb_encrypt(in_ptr + p,  out_ptr + p, &key, BF_ENCRYPT);
+      BF_ecb_encrypt(in_ptr + p,  out_ptr + p, &l_key, BF_ENCRYPT);
 
-   *out = enc_buf;
+   *out = l_enc_buf;
    return len + 8;
 }
 
@@ -110,7 +110,7 @@ int legacy_decrypt_buf(int len, char *in, char **out)
    register int p;
 
    for (p = 0; p < len; p += 8)
-      BF_ecb_encrypt(in + p, in + p, &key, BF_DECRYPT);
+      BF_ecb_encrypt(in + p, in + p, &l_key, BF_DECRYPT);
 
    p = *in;
    if (p < 1 || p > 8) {

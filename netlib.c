@@ -38,6 +38,7 @@
 #include <sys/ioctl.h>
 #include <net/if.h>
 #include <errno.h>
+#include <ifaddrs.h>
 
 #ifdef HAVE_SYS_SOCKIO_H
 #include <sys/sockio.h>
@@ -81,7 +82,7 @@ int connect_t(int s, struct sockaddr *svr, time_t timeout)
 #if defined(VTUN_SOCKS) && VTUN_SOCKS == 2
      /* Some SOCKS implementations don't support
       * non blocking connect */
-     return connect(s,svr,sizeof(struct sockaddr));
+     return connect(s,svr,sizeof(struct sockaddr_storage));
 #else
      int sock_flags;
      fd_set fdset;
@@ -93,13 +94,13 @@ int connect_t(int s, struct sockaddr *svr, time_t timeout)
      if( fcntl(s,F_SETFL,O_NONBLOCK) < 0 )
         return -1;
 
-     if( connect(s,svr,sizeof(struct sockaddr)) < 0 && errno != EINPROGRESS)
+     if( connect(s,svr,sizeof(struct sockaddr_storage)) < 0 && errno != EINPROGRESS)
         return -1;
 
      FD_ZERO(&fdset);
      FD_SET(s,&fdset);
      if( select(s+1,NULL,&fdset,NULL,timeout?&tv:NULL) > 0 ){
-        int l=sizeof(errno);	 
+        socklen_t l=sizeof(errno);	 
         errno=0;
         getsockopt(s,SOL_SOCKET,SO_ERROR,&errno,&l);
      } else
@@ -114,28 +115,78 @@ int connect_t(int s, struct sockaddr *svr, time_t timeout)
 #endif
 }
 
-/* Get interface address */
-unsigned long getifaddr(char * ifname) 
+/* Get port number, independently of address family. */
+in_port_t get_port(struct sockaddr_storage *addr)
 {
-     struct sockaddr_in addr;
-     struct ifreq ifr;
-     int s;
+	switch (addr->ss_family) {
+		case AF_INET6:
+			return ntohs(((struct sockaddr_in6 *) addr)->sin6_port);
+			break;
+		case AF_INET:
+			return ntohs(((struct sockaddr_in *) addr)->sin_port);
+			break;
+		default:
+			return 0;
+	}
+} /* get_port(struct sockaddr_storage *) */
 
-     if( (s = socket(AF_INET, SOCK_DGRAM, 0)) == -1 )
+/* Set port number, independently of address family. */
+void set_port(struct sockaddr_storage *addr, in_port_t port)
+{
+	switch (addr->ss_family) {
+		case AF_INET6:
+			((struct sockaddr_in6 *) addr)->sin6_port = htons(port);
+			break;
+		case AF_INET:
+			((struct sockaddr_in *) addr)->sin_port = htons(port);
+		default:
+			break;
+	}
+} /* set_port(struct sockaddr_storage *, in_port_t) */
+
+/* Get interface address */
+int getifaddr(struct sockaddr_storage *addr, char * ifname, sa_family_t af) 
+{
+     struct ifaddrs *ifas, *ifa;
+
+     if( getifaddrs(&ifas) < 0 )
         return -1;
 
-     strncpy(ifr.ifr_name, ifname, sizeof(ifr.ifr_name)-1);
-     ifr.ifr_name[sizeof(ifr.ifr_name)-1]='\0';
+     for (ifa = ifas; ifa; ifa = ifa->ifa_next) {
+        if( ifa->ifa_addr->sa_family != af ||
+               strcmp(ifname, ifa->ifa_name) )
+           continue;
 
-     if( ioctl(s, SIOCGIFADDR, &ifr) < 0 ){
-        close(s);
+        /* Correct address family and interface name!
+         * Locate a useful candidate. */
+
+        /* For IPv4, the first address works. */
+        if( (ifa->ifa_addr->sa_family == AF_INET) &&
+               (ifa->ifa_flags & IFF_UP) )
+           break; /* Good address. */
+
+        /* IPv6 needs some obvious exceptions. */
+        if( ifa->ifa_addr->sa_family == AF_INET6 ) {
+           if( IN6_IS_ADDR_LINKLOCAL(&((struct sockaddr_in6 *) addr)->sin6_addr.s6_addr)
+              || IN6_IS_ADDR_SITELOCAL(&((struct sockaddr_in6 *) addr)->sin6_addr.s6_addr) )
+              continue;
+           else
+              /* Successful search at this point, which
+               * only standard IPv6 can reach. */
+              break;
+        }
+     }
+
+     if( ifa == NULL ) {
+        freeifaddrs(ifas);
         return -1;
      }
-     close(s);
 
-     addr = *((struct sockaddr_in *) &ifr.ifr_addr);
+     /* Copy the found address. */
+     memcpy(addr, ifa->ifa_addr, sizeof(*addr));
+     freeifaddrs(ifas);
 
-     return addr.sin_addr.s_addr;
+     return 0;
 }
 
 /* 
@@ -144,12 +195,16 @@ unsigned long getifaddr(char * ifname)
  */
 int udp_session(struct vtun_host *host) 
 {
-     struct sockaddr_in saddr; 
+     struct sockaddr_storage saddr; 
      short port;
-     int s,opt;
+     int s;
+     socklen_t opt;
      extern int is_rmt_fd_connected;
 
-     if( (s=socket(AF_INET,SOCK_DGRAM,0))== -1 ){
+     /* Set local address and port */
+     local_addr(&saddr, host, 1);
+
+     if( (s=socket(saddr.ss_family,SOCK_DGRAM,0))== -1 ){
         vtun_syslog(LOG_ERR,"Can't create socket");
         return -1;
      }
@@ -157,8 +212,6 @@ int udp_session(struct vtun_host *host)
      opt=1;
      setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)); 
     
-     /* Set local address and port */
-     local_addr(&saddr, host, 1);
      if( bind(s,(struct sockaddr *)&saddr,sizeof(saddr)) ){
         vtun_syslog(LOG_ERR,"Can't bind to the socket");
         return -1;
@@ -171,7 +224,7 @@ int udp_session(struct vtun_host *host)
      }
 
      /* Write port of the new UDP socket */
-     port = saddr.sin_port;
+     port = get_port(&saddr);
      if( write_n(host->rmt_fd,(char *)&port,sizeof(short)) < 0 ){
         vtun_syslog(LOG_ERR,"Can't write port number");
         return -1;
@@ -190,7 +243,7 @@ int udp_session(struct vtun_host *host)
         return -1;
      }
 
-     saddr.sin_port = port;
+     set_port(&saddr, port);
 
      /* if the config says to delay the UDP connection, we wait for an
 	incoming packet and then force a connection back.  We need to
@@ -218,85 +271,103 @@ int udp_session(struct vtun_host *host)
 }
 
 /* Set local address */
-int local_addr(struct sockaddr_in *addr, struct vtun_host *host, int con)
+int local_addr(struct sockaddr_storage *addr, struct vtun_host *host, int con)
 {
-     int opt;
+     socklen_t opt;
+     char *ip = (char *) calloc(INET6_ADDRSTRLEN, sizeof(char));
+
+     memset(addr, '\0', sizeof(*addr));
 
      if( con ){
         /* Use address of the already connected socket. */
-        opt = sizeof(struct sockaddr_in);
+        opt = sizeof(*addr);
         if( getsockname(host->rmt_fd, (struct sockaddr *)addr, &opt) < 0 ){
            vtun_syslog(LOG_ERR,"Can't get local socket address");
            return -1; 
         }
      } else {
+        addr->ss_family = vtun.transport_af;
         if (generic_addr(addr, &host->src_addr) < 0)
                  return -1;
               }
 
-     host->sopt.laddr = strdup(inet_ntoa(addr->sin_addr));
+     getnameinfo((struct sockaddr *) addr, sizeof(*addr),
+		 ip, INET6_ADDRSTRLEN, NULL, 0, NI_NUMERICHOST);
+     host->sopt.laddr = ip;
 
      return 0;
 }
 
-int server_addr(struct sockaddr_in *addr, struct vtun_host *host)
+int server_addr(struct sockaddr_storage *addr, struct vtun_host *host)
 {
-     struct hostent * hent;
+     struct addrinfo hints, *aiptr;
+     char *ip, portstr[12];
 
-     memset(addr,0,sizeof(struct sockaddr_in));
-     addr->sin_family = AF_INET;
-     addr->sin_port = htons(vtun.bind_addr.port);
+     ip = (char *) calloc(INET6_ADDRSTRLEN, sizeof(char));
+
+     memset(addr, '\0', sizeof(*addr));
+
+     memset(&hints, '\0', sizeof(hints));
+     hints.ai_family = vtun.transport_af;
+     hints.ai_flags = AI_ADDRCONFIG | AI_NUMERICSERV;
+
+     snprintf(portstr, sizeof(portstr), "%u", vtun.bind_addr.port);
 
      /* Lookup server's IP address.
       * We do it on every reconnect because server's IP 
       * address can be dynamic.
       */
-     if( !(hent = gethostbyname(vtun.svr_name)) ){
-        vtun_syslog(LOG_ERR, "Can't resolv server address: %s", vtun.svr_name);
-        return -1;
+     if (getaddrinfo(vtun.svr_name, portstr, &hints, &aiptr)) {
+         vtun_syslog(LOG_ERR, "Can't resolv server address: %s", vtun.svr_name);
+         return -1;
      }
-     addr->sin_addr.s_addr = *(unsigned long *)hent->h_addr; 
 
-     host->sopt.raddr = strdup(inet_ntoa(addr->sin_addr));
+     memcpy(addr, aiptr->ai_addr, aiptr->ai_addrlen);
+     freeaddrinfo(aiptr);
+     getnameinfo((struct sockaddr *) addr, sizeof(*addr),
+		 ip, INET6_ADDRSTRLEN, NULL, 0, NI_NUMERICHOST);
+     host->sopt.raddr = ip;
      host->sopt.rport = vtun.bind_addr.port;
 
      return 0; 
 }
 
 /* Set address by interface name, ip address or hostname */
-int generic_addr(struct sockaddr_in *addr, struct vtun_addr *vaddr)
+int generic_addr(struct sockaddr_storage *addr, struct vtun_addr *vaddr)
 {
-     struct hostent *hent;
-     memset(addr, 0, sizeof(struct sockaddr_in));
-  
-     addr->sin_family = AF_INET;
+     sa_family_t use_af = addr->ss_family;
+     struct addrinfo hints, *aiptr;
+
+     memset(addr, '\0', sizeof(*addr)); /* Implicitly setting INADDR_ANY. */
+     memset(&hints, '\0', sizeof(hints));
   
      switch (vaddr->type) {
         case VTUN_ADDR_IFACE:
-	 if (!(addr->sin_addr.s_addr =
-	       getifaddr(vaddr->name))) {
-	    vtun_syslog(LOG_ERR,
-	                "Can't get address of interface %s",
-	                vaddr->name);
-	    return -1;
-	 }
-           break;
+            if (getifaddr(addr, vaddr->name, use_af)) {
+		vtun_syslog(LOG_ERR, "Can't get address of interface %s", vaddr->name);
+		return -1;
+            }
+	    break;
         case VTUN_ADDR_NAME:
-	 if (!(hent = gethostbyname(vaddr->name))) {
-	    vtun_syslog(LOG_ERR,
-	                "Can't resolv local address %s",
-	                vaddr->name);
-	    return -1;
-           }
-	 addr->sin_addr.s_addr = *(unsigned long *) hent->h_addr;
-           break;
-        default:
-           addr->sin_addr.s_addr = INADDR_ANY;
-           break;
+	    memset(&hints, '\0', sizeof(hints));
+	    hints.ai_family = use_af;
+	    hints.ai_flags = AI_ADDRCONFIG;
+
+	    if (getaddrinfo(vaddr->name, NULL, &hints, &aiptr)) {
+		vtun_syslog(LOG_ERR, "Can't resolv local address %s", vaddr->name);
+		return -1;
+	    }
+	    memcpy(addr, aiptr->ai_addr, aiptr->ai_addrlen);
+	    freeaddrinfo(aiptr);
+	    break;
+	default:
+	    /* INADDR_ANY has already been implicitly set, when erasing. */
+	    addr->ss_family = use_af;
+            break;
      }
   
      if (vaddr->port)
-        addr->sin_port = htons(vaddr->port);
+        set_port(addr, vaddr->port);
 
      return 0; 
 }

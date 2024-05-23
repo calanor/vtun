@@ -73,8 +73,8 @@ int yyerror(char *s);
 
 %token K_OPTIONS K_DEFAULT K_PORT K_BINDADDR K_PERSIST K_TIMEOUT
 %token K_PASSWD K_PROG K_PPP K_SPEED K_IFCFG K_FWALL K_ROUTE K_DEVICE 
-%token K_MULTI K_SRCADDR K_IFACE K_ADDR
-%token K_TYPE K_PROT K_NAT_HACK K_COMPRESS K_ENCRYPT K_KALIVE K_STAT
+%token K_MULTI K_SRCADDR K_IFACE K_ADDR K_IPV4 K_IPV6
+%token K_TYPE K_PROT K_NAT_HACK K_COMPRESS K_ENCRYPT K_KALIVE K_STAT K_SSLAUTH
 %token K_UP K_DOWN K_SYSLOG K_IPROUTE
 
 %token <str> K_HOST K_ERROR
@@ -190,6 +190,14 @@ option:  '\n'
 
   | K_SYSLOG  syslog_opt
 
+  | K_IPV4		{
+			  vtun.transport_af = AF_INET;
+			}
+
+  | K_IPV6		{
+			  vtun.transport_af = AF_INET6;
+			}
+
   | K_ERROR		{
 			  cfg_error("Unknown option '%s'",$1);
 			  YYABORT;
@@ -283,6 +291,13 @@ host_option: '\n'
 			  parse_host->flags &= ~(VTUN_ZLIB | VTUN_LZO); 
 			}
 			compress
+
+  | K_SSLAUTH NUM 	{ 
+	      		  parse_host->sslauth = $2;
+
+			  if(vtun.sslauth == -1) 
+			     vtun.sslauth = $2; 	
+			}
 
   | K_ENCRYPT NUM 	{  
 			  if( $2 ){
@@ -609,7 +624,7 @@ int clear_nat_hack_client(void *d, void *u)
 }
 
 /* Clear the VTUN_NAT_HACK flag which are not relevant to the current operation mode */
-inline void clear_nat_hack_flags(int svr)
+extern inline void clear_nat_hack_flags(int svr)
 {
 	if (svr)
 		llist_trav(&host_list,clear_nat_hack_server,NULL);

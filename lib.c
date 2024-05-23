@@ -38,6 +38,7 @@
 #include "vtun.h"
 #include "linkfd.h"
 #include "lib.h"
+#include <time.h>
 
 volatile sig_atomic_t __io_canceled = 0;
 

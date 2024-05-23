@@ -23,6 +23,7 @@
 #define _VTUN_LIB_H
 
 #include "config.h"
+#include <unistd.h>
 #include <sys/types.h>
 #include <signal.h>
 #include <errno.h>

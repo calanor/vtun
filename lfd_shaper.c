@@ -31,6 +31,7 @@
 #include "vtun.h"
 #include "linkfd.h"
 #include "lib.h"
+#include <time.h>
 
 /* 
  * Shaper module. 

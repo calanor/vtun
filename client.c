@@ -55,7 +55,7 @@ static void sig_term(int sig)
 
 void client(struct vtun_host *host)
 {
-     struct sockaddr_in my_addr,svr_addr;
+     struct sockaddr_storage my_addr,svr_addr;
      struct sigaction sa;
      int s, opt, reconnect;	
 
@@ -101,7 +101,7 @@ void client(struct vtun_host *host)
 	 * we want to connect, since STREAM sockets 
 	 * can be successfully connected only once.
 	 */
-        if( (s = socket(AF_INET,SOCK_STREAM,0))==-1 ){
+        if( (s = socket(my_addr.ss_family,SOCK_STREAM,0))==-1 ){
 	   vtun_syslog(LOG_ERR,"Can't create socket. %s(%d)", 
 		strerror(errno), errno);
 	   continue;
@@ -133,18 +133,18 @@ void client(struct vtun_host *host)
 	   if (!vtun.quiet || errno != ETIMEDOUT)
 	      vtun_syslog(LOG_INFO,"Connect to %s failed. %s(%d)", vtun.svr_name,
 					strerror(errno), errno);
+	      client_term = 0;
         } else {
 	   if( auth_client(s, host) ){   
 	      vtun_syslog(LOG_INFO,"Session %s[%s] opened",host->host,vtun.svr_name);
 
  	      host->rmt_fd = s;
-
-	      /* Start the tunnel */
-	      client_term = tunnel(host);
+/* Start the tunnel */ client_term = tunnel(host);
 
 	      vtun_syslog(LOG_INFO,"Session %s[%s] closed",host->host,vtun.svr_name);
 	   } else {
 	      vtun_syslog(LOG_INFO,"Connection denied by %s",vtun.svr_name);
+	      client_term = 0;
 	   }
 	}
 	close(s);

@@ -13,6 +13,9 @@ vtund \- VTun(Virtual Tunnel) daemon.
 <
 .I -s  
 >
+{
+.IR -4 | -6
+}
 [ 
 .I -i 
 ] 
@@ -27,6 +30,9 @@ vtund \- VTun(Virtual Tunnel) daemon.
 ]
 .LP
 .B vtund 
+{
+.IR -4 | -6
+}
 [ 
 .I -f file 
 ] 
@@ -70,6 +76,14 @@ It is completely user space implementation and does not require modification
 to any kernel parts. 
 
 .SH OPTIONS
+.TP
+.I -4
+Use \fBIPv4\fR for transport, and for listening socket. This is the default choice.
+Any of the addressing modes IPv4 or IPv6 can passed inside the tunnel.
+The decision to use either is made by the \fIifconfig\fR and \fIip\fR commands.
+.TP
+.I -6
+Choose \fBIPv6\fR as transport layer, and server listening socket.
 .TP
 .I -f file 
 Read config information from the

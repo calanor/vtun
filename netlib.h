@@ -32,12 +32,14 @@
 #include <netinet/in.h>
 #endif
 
-unsigned long getifaddr(char * ifname);
+int getifaddr(struct sockaddr_storage *addr, char * ifname, sa_family_t af);
 int connect_t(int s, struct sockaddr *svr, time_t timeout); 
 int udp_session(struct vtun_host *host); 
 
-int local_addr(struct sockaddr_in *addr, struct vtun_host *host, int con);
-int server_addr(struct sockaddr_in *addr, struct vtun_host *host);
-int generic_addr(struct sockaddr_in *addr, struct vtun_addr *vaddr);
+int local_addr(struct sockaddr_storage *addr, struct vtun_host *host, int con);
+int server_addr(struct sockaddr_storage *addr, struct vtun_host *host);
+int generic_addr(struct sockaddr_storage *addr, struct vtun_addr *vaddr);
+in_port_t get_port(struct sockaddr_storage *addr);
+void set_port(struct sockaddr_storage *addr, in_port_t port);
 
 #endif /* _VTUN_NETDEV_H */

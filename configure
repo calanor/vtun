@@ -6539,9 +6539,14 @@ echo "${ECHO_T}" >&6
 
 REL=`echo 'BRANCH-3_X' | tr -d '$: \-' | sed 's/^[A-Za-z]*//' | sed 's/\_/\./'`
 
+if test -n "$SOURCE_DATE_EPOCH"; then
+	BUILD_DATE=`date --utc --date="@${SOURCE_DATE_EPOCH}" '+%m/%d/%Y'`
+else
+	BUILD_DATE=`date '+%m/%d/%Y'`
+fi
 
 cat >>confdefs.h <<_ACEOF
-#define VTUN_VER "$REL `date '+%m/%d/%Y'`"
+#define VTUN_VER "$REL $BUILD_DATE"
 _ACEOF
 
 

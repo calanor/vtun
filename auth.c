@@ -23,6 +23,10 @@
 /*
  * Challenge based authentication. 
  * Thanx to Chris Todd<christ@insynq.com> for the good idea.
+ *
+ * Artur R. Czechowski <arturcz@hell.pl>, 02/17/2002
+ * 	Add support for connectin ssl to non-ssl vtuns (sslauth option)
+ * 	Use /dev/random in non-ssl gen_chal  (if possible)
  */ 
 
 #include "config.h"
@@ -55,66 +59,102 @@
 #include "lock.h"
 #include "auth.h"
 
-/* Encryption and Decryption of the challenge key */
 #ifdef HAVE_SSL
 
 #include <openssl/md5.h>
 #include <openssl/blowfish.h>
 #include <openssl/rand.h>
 
-void gen_chal(char *buf)
+#endif /* HAVE_SSL */
+
+/* Okay, start the "blue-wire" non-ssl auth patch stuff */
+void nonssl_encrypt_chal(char *chal, char *pwd)
 {
-   RAND_bytes(buf, VTUN_CHAL_SIZE);
-}
-
-void encrypt_chal(char *chal, char *pwd)
-{ 
-   register int i;
-   BF_KEY key;
-
-   BF_set_key(&key, 16, MD5(pwd,strlen(pwd),NULL));
-
-   for(i=0; i < VTUN_CHAL_SIZE; i += 8 )
-      BF_ecb_encrypt(chal + i,  chal + i, &key, BF_ENCRYPT);
-}
-
-void decrypt_chal(char *chal, char *pwd)
-{ 
-   register int i;
-   BF_KEY key;
-
-   BF_set_key(&key, 16, MD5(pwd,strlen(pwd),NULL));
-
-   for(i=0; i < VTUN_CHAL_SIZE; i += 8 )
-      BF_ecb_encrypt(chal + i,  chal + i, &key, BF_DECRYPT);
-}
-
-#else /* HAVE_SSL */
-
-void encrypt_chal(char *chal, char *pwd)
-{ 
-   char * xor_msk = pwd;
+   char *xor_msk = pwd;
    register int i, xor_len = strlen(xor_msk);
 
+   syslog(LOG_INFO, "Use nonSSL-aware challenge/response");
    for(i=0; i < VTUN_CHAL_SIZE; i++)
       chal[i] ^= xor_msk[i%xor_len];
 }
 
-void inline decrypt_chal(char *chal, char *pwd)
-{ 
-   encrypt_chal(chal, pwd);
+inline void nonssl_decrypt_chal(char *chal, char *pwd)
+{
+   nonssl_encrypt_chal(chal, pwd);
 }
+/* Mostly ended here, other than a couple replaced #ifdefs */
+
+/* Encryption and Decryption of the challenge-key */
+#ifdef HAVE_SSL
+
+void gen_chal(char *buf)
+{
+   RAND_bytes((unsigned char *)buf, VTUN_CHAL_SIZE);
+}
+
+void ssl_encrypt_chal(char *chal, char *pwd)
+{ 
+   register int i;
+   BF_KEY key;
+
+   syslog(LOG_INFO, "Use SSL-aware challenge/response");
+   BF_set_key(&key, 16, MD5((unsigned char *)pwd,strlen(pwd),NULL));
+
+   for(i=0; i < VTUN_CHAL_SIZE; i += 8 )
+      BF_ecb_encrypt((unsigned char *)chal + i,  (unsigned char *)chal + i, &key, BF_ENCRYPT);
+}
+
+void ssl_decrypt_chal(char *chal, char *pwd)
+{ 
+   register int i;
+   BF_KEY key;
+
+   syslog(LOG_INFO, "Use SSL-aware challenge/response");
+   BF_set_key(&key, 16, MD5((unsigned char *)pwd,strlen(pwd),NULL));
+
+   for(i=0; i < VTUN_CHAL_SIZE; i += 8 )
+      BF_ecb_encrypt((unsigned char *)chal + i,  (unsigned char *)chal + i, &key, BF_DECRYPT);
+}
+
+#else /* HAVE_SSL */
 
 /* Generate PSEUDO random challenge key. */
 void gen_chal(char *buf)
 {
    register int i;
- 
-   srand(time(NULL));
+   unsigned int seed;
+   char *pseed;
+   int fd,cnt,len;
+
+   if((fd=open("/dev/random",O_RDONLY))!=-1) {
+      pseed=(char *)&seed;
+      len=cnt=sizeof(seed);
+      while(cnt>0) {
+         cnt=read(fd,pseed,len);
+         len=len-cnt;
+         pseed=pseed+cnt;
+      }
+   } else {
+      seed=time(NULL);
+   }
+   srand(seed);
 
    for(i=0; i < VTUN_CHAL_SIZE; i++)
       buf[i] = (unsigned int)(255.0 * rand()/RAND_MAX);
 }
+
+void ssl_encrypt_chal(char *chal, char *pwd)
+{
+	syslog(LOG_ERR,"Cannot use `sslauth yes' without SSL support - fallback to `sslauth no'");
+	nonssl_encrypt_chal(chal,pwd);
+}
+
+void ssl_decrypt_chal(char *chal, char *pwd)
+{
+	syslog(LOG_ERR,"Cannot use `sslauth yes' without SSL support - fallback to `sslauth no'");
+	nonssl_decrypt_chal(chal,pwd);
+}
+
 #endif /* HAVE_SSL */
 
 /* 
@@ -358,7 +398,11 @@ struct vtun_host * auth_server(int fd)
 		   if( !(h = find_host(host)) )
 		      break;
 
-		   decrypt_chal(chal_res, h->passwd);   		
+		   if (h->sslauth) {
+		      ssl_decrypt_chal(chal_res, h->passwd);   		
+		   } else {
+		      nonssl_decrypt_chal(chal_res, h->passwd);   		
+		   }
 	
 		   if( !memcmp(chal_req, chal_res, VTUN_CHAL_SIZE) ){
 		      /* Auth successeful. */
@@ -410,7 +454,11 @@ int auth_client(int fd, struct vtun_host *host)
 		   if( !strncmp(buf,"OK",2) && cs2cl(buf,chal)){
 		      stage = ST_CHAL;
 					
-		      encrypt_chal(chal,host->passwd);
+		      if (host->sslauth) {
+		         ssl_encrypt_chal(chal,host->passwd);
+		      } else {
+		         nonssl_encrypt_chal(chal,host->passwd);
+		      }
 		      print_p(fd,"CHAL: %s\n", cl2cs(chal));
 
 		      continue;

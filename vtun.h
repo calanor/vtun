@@ -23,6 +23,7 @@
 #ifndef _VTUN_H
 #define _VTUN_H
 
+#include <sys/socket.h>     /* We need 'sa_family_t'. */
 #include "llist.h"
 
 /* Default VTUN port */
@@ -98,6 +99,9 @@ struct vtun_host {
 
    int  rmt_fd;
    int  loc_fd;
+
+   /* SSL strong auth */
+   int  sslauth;
 
    /* Persist mode */
    int  persist;
@@ -204,6 +208,7 @@ extern llist host_list;
 struct vtun_opts {
    int  timeout;
    int  persist;
+   int  sslauth;
 
    char *cfg_file;
 
@@ -214,6 +219,7 @@ struct vtun_opts {
    char *fwall; 	 /* Command to configure FireWall */
    char *iproute;	 /* iproute command */
 
+   sa_family_t transport_af; /* Preferred address family for transport. */
    char *svr_name;       /* Server's host name */
    char *svr_addr;       /* Server's address (string) */
    struct vtun_addr bind_addr;	 /* Server should listen on this address */

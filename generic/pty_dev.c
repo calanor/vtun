@@ -19,7 +19,9 @@
 /*
  * $Id: pty_dev.c,v 1.4.2.2 2008/01/07 22:36:13 mtbishop Exp $
  */ 
-
+/* Althought differing from documentation, this is necessary to have
+ * posix_openpt in GNU libc */
+#define _XOPEN_SOURCE 600
 #include "config.h"
 
 #include <unistd.h>
@@ -28,6 +30,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <syslog.h>
+
+#include <pty.h>
 
 #include "vtun.h"
 #include "lib.h"
@@ -39,10 +43,10 @@
 int pty_open(char *sl_name)
 {
     int  mr_fd;
-#if defined (HAVE_GETPT) && defined (HAVE_GRANTPT) && defined (HAVE_UNLOCKPT) && defined (HAVE_PTSNAME)
+#if defined (HAVE_POSIX_OPENPT) && defined (HAVE_GRANTPT) && defined (HAVE_UNLOCKPT) && defined (HAVE_PTSNAME)
     char *ptyname;
 
-    if((mr_fd=getpt()) < 0)
+    if((mr_fd=posix_openpt(O_RDWR|O_NOCTTY)) < 0)
  	return -1;
     if(grantpt(mr_fd) != 0)
 	return -1;
@@ -55,31 +59,29 @@ int pty_open(char *sl_name)
 
 #else
 
-    char ptyname[] = "/dev/ptyXY";
-    char ch[] = "pqrstuvwxyz";
-    char digit[] = "0123456789abcdefghijklmnopqrstuv";
+    char ptyname[1024];
     int  l, m;
+    int master, slave;
 
-    /* This algorithm should work for almost all standard Unices */	
-    for(l=0; ch[l]; l++ ) {
-        for(m=0; digit[m]; m++ ) {
-	 	ptyname[8] = ch[l];
-		ptyname[9] = digit[m];
-		/* Open the master */
-		if( (mr_fd=open(ptyname, O_RDWR)) < 0 )
-	 	   continue;
+    /* This algorithm works for UNIX98 PTS */	
+
+    /* Open the master */
+    mr_fd = openpty(&master, &slave, ptyname, NULL, NULL);
+    if (mr_fd == -1)
+    {
+      printf("error open pty");
+      return -1;
+    }
+    else
+    {
 		/* Check the slave */
-		ptyname[5] = 't';
 		if( (access(ptyname, R_OK | W_OK)) < 0 ){
-		   close(mr_fd);
-		   ptyname[5] = 'p';
-		   continue;
+		   /* close(mr_fd); */
+		   return -1;
 		}
 		strcpy(sl_name,ptyname);
-		return mr_fd;
-	    }
-	}
-	return -1;
+		return master;
+   }
 #endif
 }
 

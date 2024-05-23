@@ -279,7 +279,7 @@ int lfd_linker(void)
 	   if( (tmplen=lfd_run_down(tmplen,buf,&out)) == -1 )
 	      break;
 	   if( tmplen && proto_write(fd1, out, tmplen) < 0 )
-	      break;
+              break;
 	   lfd_host->stat.comp_out += tmplen; 
         }
 
@@ -415,7 +415,7 @@ int linkfd(struct vtun_host *host)
         sa.sa_handler=sig_usr1;
         sigaction(SIGUSR1,&sa,NULL);
 
-	sprintf(file,"%s/%.20s", VTUN_STAT_DIR, host->host);
+	sprintf(file,"%s/%.20s.dump", VTUN_STAT_DIR, host->host);
 	if( (host->stat.file=fopen(file, "a")) ){
 	   setvbuf(host->stat.file, NULL, _IOLBF, 0);
 	} else

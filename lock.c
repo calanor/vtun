@@ -37,6 +37,7 @@
 #include "linkfd.h"
 #include "lib.h" 
 #include "lock.h"
+#include <time.h>
 
 int create_lock(char * file)
 {

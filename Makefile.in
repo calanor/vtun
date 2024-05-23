@@ -19,7 +19,7 @@
 #  
 CC = @CC@
 CFLAGS = @CFLAGS@ @CPPFLAGS@
-LDFLAGS = @LDFLAGS@ @LIBS@
+LDFLAGS = @LDFLAGS@ @LIBS@ -lutil
 
 YACC = @YACC@
 YACCFLAGS = -d
@@ -39,12 +39,12 @@ MAN_DIR  = @mandir@
 ETC_DIR  = @sysconfdir@
 VAR_DIR  = @localstatedir@
 
-PID_FILE = ${VAR_DIR}/run/vtund.pid
+PID_DIR = ${VAR_DIR}/run
 CFG_FILE = ${ETC_DIR}/vtund.conf
 STAT_DIR = ${VAR_DIR}/log/vtund
 LOCK_DIR = ${VAR_DIR}/lock/vtund
 
-DEFS = -DVTUN_CONFIG_FILE=\"$(CFG_FILE)\" -DVTUN_PID_FILE=\"$(PID_FILE)\" \
+DEFS = -DVTUN_CONFIG_FILE=\"$(CFG_FILE)\" -DVTUN_PID_DIR=\"$(PID_DIR)\" \
        -DVTUN_STAT_DIR=\"$(STAT_DIR)\" -DVTUN_LOCK_DIR=\"$(LOCK_DIR)\"
 
 OBJS = main.o cfg_file.tab.o cfg_file.lex.o server.o client.o lib.o \

@@ -30,6 +30,7 @@
 #include <fcntl.h>
 #include <syslog.h>
 #include <sys/socket.h>
+#include <netdb.h>
 
 #ifdef HAVE_NETINET_IN_H
 #include <netinet/in.h>
@@ -60,24 +61,30 @@ static void sig_term(int sig)
 
 void connection(int sock)
 {
-     struct sockaddr_in my_addr, cl_addr;
+     struct sockaddr_storage my_addr, cl_addr;
      struct vtun_host *host;
      struct sigaction sa;
-     char *ip;
-     int opt;
+     char *cl_ip, *my_ip;
+     socklen_t opt;
 
-     opt = sizeof(struct sockaddr_in);
+     cl_ip = calloc(INET6_ADDRSTRLEN, sizeof(char));
+     my_ip = calloc(INET6_ADDRSTRLEN, sizeof(char));
+
+     opt = sizeof(cl_addr);
      if( getpeername(sock, (struct sockaddr *) &cl_addr, &opt) ){
         vtun_syslog(LOG_ERR, "Can't get peer name");
         exit(1);
      }
-     opt = sizeof(struct sockaddr_in);
+     opt = sizeof(my_addr);
      if( getsockname(sock, (struct sockaddr *) &my_addr, &opt) < 0 ){
         vtun_syslog(LOG_ERR, "Can't get local socket address");
         exit(1); 
      }
 
-     ip = strdup(inet_ntoa(cl_addr.sin_addr));
+     getnameinfo((struct sockaddr *) &cl_addr, sizeof(cl_addr),
+                 cl_ip, INET6_ADDRSTRLEN, NULL, 0, NI_NUMERICHOST);
+     getnameinfo((struct sockaddr *) &my_addr, sizeof(my_addr),
+                 my_ip, INET6_ADDRSTRLEN, NULL, 0, NI_NUMERICHOST);
 
      io_init();
 
@@ -86,14 +93,14 @@ void connection(int sock)
 	sa.sa_flags=SA_NOCLDWAIT;;
         sigaction(SIGHUP,&sa,NULL);
 
-	vtun_syslog(LOG_INFO,"Session %s[%s:%d] opened", host->host, ip, 
-					ntohs(cl_addr.sin_port) );
+        vtun_syslog(LOG_INFO,"Session %s[%s:%d] opened", host->host, cl_ip, 
+					get_port(&cl_addr) );
         host->rmt_fd = sock; 
 	
-        host->sopt.laddr = strdup(inet_ntoa(my_addr.sin_addr));
+        host->sopt.laddr = my_ip;
         host->sopt.lport = vtun.bind_addr.port;
-        host->sopt.raddr = strdup(ip);
-	host->sopt.rport = ntohs(cl_addr.sin_port);
+        host->sopt.raddr = strdup(cl_ip);
+        host->sopt.rport = get_port(&cl_addr);
 
 	/* Start tunnel */
 	tunnel(host);
@@ -103,8 +110,8 @@ void connection(int sock)
 	/* Unlock host. (locked in auth_server) */	
 	unlock_host(host);
      } else {
-        vtun_syslog(LOG_INFO,"Denied connection from %s:%d", ip,
-					ntohs(cl_addr.sin_port) );
+        vtun_syslog(LOG_INFO,"Denied connection from %s:%d", cl_ip,
+					get_port(&cl_addr) );
      }
      close(sock);
 
@@ -114,20 +121,22 @@ void connection(int sock)
 void listener(void)
 {
      struct sigaction sa;
-     struct sockaddr_in my_addr, cl_addr;
-     int s, s1, opt;
+     struct sockaddr_storage my_addr, cl_addr;
+     int s, s1;
+     socklen_t opt;
 
      memset(&my_addr, 0, sizeof(my_addr));
-     my_addr.sin_family = AF_INET;
 
      /* Set listen address */
+     my_addr.ss_family = vtun.transport_af;
+
      if( generic_addr(&my_addr, &vtun.bind_addr) < 0)
      {
         vtun_syslog(LOG_ERR, "Can't fill in listen socket");
         exit(1);
      }
 
-     if( (s=socket(AF_INET,SOCK_STREAM,0))== -1 ){
+     if( (s=socket(my_addr.ss_family,SOCK_STREAM,0))== -1 ){
 	vtun_syslog(LOG_ERR,"Can't create socket");
 	exit(1);
      }
@@ -186,7 +195,7 @@ void server(int sock)
      sigaction(SIGUSR1,&sa,NULL);
 
      vtun_syslog(LOG_INFO,"VTUN server ver %s (%s)", VTUN_VER,
-		 vtun.svr_type == VTUN_INETD ? "inetd" : "stand" );
+		 vtun.svr_type == VTUN_INETD ? "inetd" : "standalone" );
 
      switch( vtun.svr_type ){
 	case VTUN_STAND_ALONE:
